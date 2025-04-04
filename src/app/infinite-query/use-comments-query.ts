@@ -1,10 +1,13 @@
 import { fetchData, postData } from "@/lib/fetch-utils";
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { InfiniteData, QueryKey, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CommentsResponse } from "../api/comments/route";
+import { Comment } from "../api/comments/data";
+
+const queryKey: QueryKey = ["comments"];
 
 export function useCommentsQuery() {
   return useInfiniteQuery({
-    queryKey: ["comments"],
+    queryKey,
     queryFn: ({ pageParam }) =>
       fetchData<CommentsResponse>(
         `/api/comments?${pageParam ? `cursor=${pageParam}` : ""}`
@@ -18,9 +21,31 @@ export function useCreateCommentMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (newComment: { text: string }) => postData("api/comments", newComment),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["comments"] });
+    mutationFn: (newComment: { text: string }) =>
+      postData<{ comment: Comment }>("api/comments", newComment),
+    onSuccess: async ({ comment }) => {
+      await queryClient.cancelQueries({ queryKey }),
+
+        queryClient.setQueryData<InfiniteData<CommentsResponse, number | undefined>>(
+          queryKey,
+          oldData => {
+            const firstPage = oldData?.pages[0];
+
+            if (firstPage) {
+              return {
+                ...oldData,
+                pages: [
+                  {
+                    ...firstPage,
+                    totalComments: firstPage.totalComments + 1,
+                    comments: [comment, ...firstPage.comments],
+                  },
+                  ...oldData.pages.slice(1)
+                ]
+              }
+            }
+          }
+        )
     }
   })
 }
